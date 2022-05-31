@@ -1,2 +1,2 @@
 # knocking
-service protection based on knocking technique 
+Netfilter module for service protection based on knocking technique. 

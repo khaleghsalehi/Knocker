@@ -8,6 +8,8 @@
 #include <netinet/tcp.h>
 
 #include <libnetfilter_queue/libnetfilter_queue.h>
+#include <unistd.h>
+#include <sys/stat.h>
 
 #define IPTYPE 8
 #define TCPTYPE 6
@@ -20,6 +22,33 @@ typedef u_int tcp_seq;
 
 u_int32_t id;
 u_int8_t flag;
+
+
+static int initBackgroundService() {
+    //todo SIGNAL handler.
+    pid_t process_id = 0;
+    pid_t sid = 0;
+    process_id = fork();
+    if (process_id < 0) {
+        syslog(LOG_ERR, "fork failed!");
+        exit(1);
+    }
+    if (process_id > 0) {
+        syslog(LOG_NOTICE, "knocking new child process pid -> [%d]", process_id);
+        exit(0);
+    }
+    umask(0);
+    sid = setsid();
+    if (sid < 0) {
+        exit(1);
+    }
+    chdir("/");
+    close(STDIN_FILENO);
+    close(STDOUT_FILENO);
+    close(STDERR_FILENO);
+    syslog(LOG_NOTICE, "start knocking daemon...");
+    return 0;
+}
 
 
 static u_int32_t knocking_process(struct nfq_data *tb) {
@@ -136,8 +165,9 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    fd = nfq_fd(h);
+    initBackgroundService();
 
+    fd = nfq_fd(h);
     for (;;) {
         if ((rv = recv(fd, buf, sizeof(buf), 0)) >= 0) {
 

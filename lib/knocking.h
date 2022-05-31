@@ -5,6 +5,8 @@
 #ifndef KNOCKER_KNOCKING_H
 #define KNOCKER_KNOCKING_H
 
+#define  DROP_REQUEST           0
+#define  ALLOW_REQUEST          1
 
 //todo make r_dst_port configurable
 static int port_seq_one = 1919;
@@ -16,9 +18,19 @@ struct request_chain {
     int knocked_port;
     struct request_chain *next;
 };
+struct authenticated_client {
+    char *src_ip;
+    char *mac_address; // in the case of LAN environment
+    struct authenticated_client *next;
+};
+
 
 struct request_chain *queue_head = NULL;
 struct request_chain *queue_ptr = NULL;
+
+struct authenticated_client *client_list_head = NULL;
+struct authenticated_client *client_list_ptr = NULL;
+
 
 void add_req_queue(char *src_ip, int port) {
     struct request_chain *node = (struct request_chain *) malloc(sizeof(struct request_chain));
@@ -27,6 +39,15 @@ void add_req_queue(char *src_ip, int port) {
     node->next = queue_head;
     queue_head = node;
 }
+
+void add_client_allow_list(char *src_ip, char *mac_address) {
+    struct authenticated_client *node = (struct authenticated_client *) malloc(sizeof(struct authenticated_client));
+    node->src_ip = src_ip;
+    node->mac_address = mac_address;
+    node->next = client_list_head;
+    client_list_head = node;
+}
+
 
 void echo_req_queue() {
     int count = 0;
@@ -47,6 +68,17 @@ int knock_registered(char *ip, int port) {
             return 0;
         }
         queue_ptr = queue_ptr->next;
+    }
+    return 1;
+}
+
+int is_authenticated_client(char *ip) {
+    client_list_ptr = client_list_head;
+    while (client_list_ptr != NULL) {
+        if (strcmp(client_list_ptr->src_ip, ip) == 0) {
+            return 0;
+        }
+        client_list_ptr = client_list_ptr->next;
     }
     return 1;
 }

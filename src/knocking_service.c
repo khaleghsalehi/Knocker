@@ -12,12 +12,12 @@
 #include <sys/stat.h>
 
 
-#include "lib/knocking.h"
+#include "../lib/knocking.h"
 
 #define IPTYPE 8
 #define TCPTYPE 6
 
-#define VERSION "0.0.1"
+#define VERSION "0.0.2"
 
 
 typedef u_int tcp_seq;
@@ -67,7 +67,7 @@ static u_int32_t knocking_process(struct nfq_data *tb) {
     int tcp_header_size;
     int tcp_data_len;
 
-    flag = 1;
+    flag = DROP_REQUEST;
 
     ph = nfq_get_msg_packet_hdr(tb);
     if (ph) id = ntohl(ph->packet_id); // id
@@ -115,34 +115,40 @@ static u_int32_t knocking_process(struct nfq_data *tb) {
     // here where we go to check the knocking criteria
 
 
-
-    if (ip_header->ip_p == TCPTYPE && r_dst_port == port_seq_one && tcp_header->syn) {
-        syslog(LOG_NOTICE, "knocking triggered by %s on port %d.", src, port_seq_one);
-        add_req_queue(src, r_dst_port);
-    } else if (ip_header->ip_p == TCPTYPE && r_dst_port == port_seq_tow && tcp_header->syn) {
-        syslog(LOG_NOTICE, "knocking triggered on %d.", port_seq_tow);
-        if (knock_registered(src, port_seq_one) == 0) {
-            syslog(LOG_NOTICE, "%s entered to second chain by port %d.", src, port_seq_tow);
+    if (is_authenticated_client(src) == 0) {
+        // client already authenticated successfully
+        syslog(LOG_NOTICE, "** client already authenticated successfully **");
+        flag = ALLOW_REQUEST;
+    } else {
+        syslog(LOG_NOTICE, "client not authenticated yet.");
+        if (ip_header->ip_p == TCPTYPE && r_dst_port == port_seq_one && tcp_header->syn) {
+            syslog(LOG_NOTICE, "knocking triggered by %s on port %d.", src, port_seq_one);
             add_req_queue(src, r_dst_port);
+        } else if (ip_header->ip_p == TCPTYPE && r_dst_port == port_seq_tow && tcp_header->syn) {
+            syslog(LOG_NOTICE, "knocking triggered on %d.", port_seq_tow);
+            if (knock_registered(src, port_seq_one) == 0) {
+                syslog(LOG_NOTICE, "%s entered to second chain by port %d.", src, port_seq_tow);
+                add_req_queue(src, r_dst_port);
+            }
+        } else if (ip_header->ip_p == TCPTYPE && r_dst_port == port_seq_three && tcp_header->syn) {
+            syslog(LOG_NOTICE, "knocking triggered by %s on %d.", src, port_seq_three);
+            if (knock_registered(src, port_seq_tow) == 0) {
+                syslog(LOG_NOTICE, "%s entered to last chain by port %d.", src, port_seq_three);
+                add_req_queue(src, r_dst_port);
+                //todo here do main action
+                syslog(LOG_NOTICE, "Success! client authenticated.");
+                add_client_allow_list(src, NULL);
+                echo_req_queue();
+            }
         }
-    } else if (ip_header->ip_p == TCPTYPE && r_dst_port == port_seq_three && tcp_header->syn) {
-        syslog(LOG_NOTICE, "knocking triggered by %s on %d.", src, port_seq_three);
-        if (knock_registered(src, port_seq_tow) == 0) {
-            syslog(LOG_NOTICE, "%s entered to last chain by port %d.", src, port_seq_three);
-            add_req_queue(src, r_dst_port);
-            //todo here do main action
-            syslog(LOG_NOTICE, "Success! client authenticated.");
-            echo_req_queue();
-        }
+        flag = DROP_REQUEST;
     }
-
 
     free(src_ip_info);
     free(dst_ip_info);
     src_ip_info = NULL; // avoid use after free attack
     dst_ip_info = NULL;// avoid use after free attack
 
-    flag = 1;
     return id;
 }
 
@@ -168,6 +174,7 @@ int main(int argc, char *argv[]) {
     system("iptables -t nat -F");
 
     // check req form local machine (lo)
+    system("sudo echo 1 > /proc/sys/net/ipv4/ip_forward");
     system("sudo iptables -A INPUT -j NFQUEUE --queue-num 0");
     system("sudo iptables -A OUTPUT -j NFQUEUE --queue-num 0");
 

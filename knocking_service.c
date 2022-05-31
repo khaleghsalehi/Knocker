@@ -11,6 +11,9 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
+
+#include "lib/knocking.h"
+
 #define IPTYPE 8
 #define TCPTYPE 6
 
@@ -24,8 +27,7 @@ u_int32_t id;
 u_int8_t flag;
 
 
-static int initBackgroundService() {
-    //todo SIGNAL handler.
+static int go_background_service() {
     pid_t process_id = 0;
     pid_t sid = 0;
     process_id = fork();
@@ -46,7 +48,7 @@ static int initBackgroundService() {
     close(STDIN_FILENO);
     close(STDOUT_FILENO);
     close(STDERR_FILENO);
-    syslog(LOG_NOTICE, "start knocking daemon...");
+    syslog(LOG_NOTICE, "start knocking %s daemon...", VERSION);
     return 0;
 }
 
@@ -93,16 +95,54 @@ static u_int32_t knocking_process(struct nfq_data *tb) {
     tcp_data_area = data + ip_header_size + tcp_header_size;
     tcp_data_len = ret - ip_header_size - tcp_header_size;
 
-    const int r_dst_port = htons(tcp_header->th_dport);
 
+    const int r_dst_port = htons(tcp_header->th_dport);
+    const int r_src_port = htons(tcp_header->th_sport);
+
+    char *src_ip_info;
+    src_ip_info = malloc(sizeof(char) * 20);
+    memset(src_ip_info, '\0', strlen(src_ip_info));
+    char *src = dump_ip(htonl(ip_header->ip_src.s_addr), src_ip_info);
+
+    char *dst_ip_info;
+    dst_ip_info = malloc(sizeof(char) * 20);
+    memset(dst_ip_info, '\0', strlen(dst_ip_info));
+    char *dst = dump_ip(htonl(ip_header->ip_dst.s_addr), dst_ip_info);
+
+    remove_spaces(dst);
+    remove_spaces(src);
 
     // here where we go to check the knocking criteria
-    if (ip_header->ip_p == TCPTYPE && r_dst_port == 2020 && tcp_header->syn) {
-        syslog(LOG_NOTICE, "knocking triggered.");
-        flag = 1;
-        //todo action e.g open ssh server
+
+
+
+    if (ip_header->ip_p == TCPTYPE && r_dst_port == port_seq_one && tcp_header->syn) {
+        syslog(LOG_NOTICE, "knocking triggered by %s on port %d.", src, port_seq_one);
+        add_req_queue(src, r_dst_port);
+    } else if (ip_header->ip_p == TCPTYPE && r_dst_port == port_seq_tow && tcp_header->syn) {
+        syslog(LOG_NOTICE, "knocking triggered on %d.", port_seq_tow);
+        if (knock_registered(src, port_seq_one) == 0) {
+            syslog(LOG_NOTICE, "%s entered to second chain by port %d.", src, port_seq_tow);
+            add_req_queue(src, r_dst_port);
+        }
+    } else if (ip_header->ip_p == TCPTYPE && r_dst_port == port_seq_three && tcp_header->syn) {
+        syslog(LOG_NOTICE, "knocking triggered by %s on %d.", src, port_seq_three);
+        if (knock_registered(src, port_seq_tow) == 0) {
+            syslog(LOG_NOTICE, "%s entered to last chain by port %d.", src, port_seq_three);
+            add_req_queue(src, r_dst_port);
+            //todo here do main action
+            syslog(LOG_NOTICE, "Success! client authenticated.");
+            echo_req_queue();
+        }
     }
 
+
+    free(src_ip_info);
+    free(dst_ip_info);
+    src_ip_info = NULL; // avoid use after free attack
+    dst_ip_info = NULL;// avoid use after free attack
+
+    flag = 1;
     return id;
 }
 
@@ -121,9 +161,8 @@ int main(int argc, char *argv[]) {
     int rv;
     char buf[4096] __attribute__ ((aligned));
 
-    syslog(LOG_NOTICE, "start knocking ver[%s]", VERSION);
 
-    // reset linux iptables
+    // reset linux iptables,
     system("iptables -F");
     system("iptables -X");
     system("iptables -t nat -F");
@@ -165,7 +204,7 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    initBackgroundService();
+    go_background_service();
 
     fd = nfq_fd(h);
     for (;;) {

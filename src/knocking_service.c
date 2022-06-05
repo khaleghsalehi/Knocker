@@ -17,7 +17,7 @@
 #define IPTYPE 8
 #define TCPTYPE 6
 
-#define VERSION "0.0.2"
+#define VERSION "0.0.3"
 
 
 typedef u_int tcp_seq;
@@ -118,7 +118,12 @@ static u_int32_t knocking_process(struct nfq_data *tb) {
     if (is_authenticated_client(src) == 0) {
         // client already authenticated successfully
         syslog(LOG_NOTICE, "** client already authenticated successfully **");
+        free(src_ip_info);
+        free(dst_ip_info);
+        src_ip_info = NULL; // avoid use after free attack
+        dst_ip_info = NULL;// avoid use after free attack
         flag = ALLOW_REQUEST;
+        return id;
     } else {
         syslog(LOG_NOTICE, "client not authenticated yet.");
         if (ip_header->ip_p == TCPTYPE && r_dst_port == port_seq_one && tcp_header->syn) {
